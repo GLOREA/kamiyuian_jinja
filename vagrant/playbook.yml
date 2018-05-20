@@ -1,0 +1,86 @@
+---
+- hosts: all
+  user: vagrant
+  become: yes
+  vars:
+    ruby:
+      version: 2.4.3
+    node:
+      version: v8.9.4
+
+  tasks:
+    - name: timezone
+      timezone: name=Asia/Tokyo
+
+    - name: locale
+      locale_gen: name=ja_JP.UTF-8
+
+    - name: source.list
+      replace:
+        dest: /etc/apt/sources.list
+        regexp: http://(.+)\.ubuntu\.com/ubuntu(.+)
+        replace: http://ftp.jaist.ac.jp/pub/Linux/ubuntu\2
+
+    - name: update and upgrade apt packages
+      apt: upgrade=yes update_cache=yes
+
+    - name: install packages
+      apt: pkg={{item}} update_cache=yes
+      with_items:
+        - git
+        # https://github.com/rbenv/ruby-build/wiki#suggested-build-environment
+        - autoconf
+        - bison
+        - build-essential
+        - libssl-dev
+        - libyaml-dev
+        - libreadline6-dev
+        - zlib1g-dev
+        - libncurses5-dev
+        - libffi-dev
+        - libgdbm3
+        - libgdbm-dev
+        # gem dependency
+        - imagemagick # rmagick
+        - libmagickwand-dev # rmagick
+        - libxml2-dev # nokogiri
+        - graphviz # ruby-graphviz
+        # pdf to image
+        - poppler-utils
+        - fonts-ipaexfont-gothic
+        - fonts-ipaexfont-mincho
+        # redis
+        - redis-server
+
+    # aptでインストールしたnodejsは削除
+    - block:
+      - name: uninstall nodejs
+        apt: pkg={{item}} state=absent
+        with_items:
+          - nodejs
+          - npm
+      - name: remove nodesource
+        file: path=/etc/apt/sources.list.d/nodesource.list state=absent
+
+    # nvmでnodeをインストール
+    - block:
+        - name: install nvm
+          git: repo={{item.repo}} dest={{item.dest}}
+          with_items:
+            - { repo: "https://github.com/creationix/nvm.git", dest: ~/.nvm }
+        - name: nvm config
+          blockinfile:
+            path: ~/.profile
+            marker: "# {mark} ANSIBLE MANAGED BLOCK nvm"
+            block: |
+              export NVM_DIR="$HOME/.nvm"
+              [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+              [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+        - name: get current node version
+          shell: /bin/bash -lc "nvm version"
+          register: current_node_version
+          changed_when: no
+        - name: install node {{node.version}}
+          shell: /bin/bash -lc "nvm install {{node.version}} && nvm alias default {{node.version}}"
+          when: node.version != current_node_version.stdout
+      become: no
